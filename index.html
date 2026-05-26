@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ผลการสำรวจลูกน้ำยุงลาย ตำบลห้วยโป่ง</title>
+    
+    <!-- Google Fonts: Kanit -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Kanit', 'sans-serif'] },
+                    colors: { primary: '#1e3a8a', secondary: '#047857', danger: '#be123c', warning: '#eab308' }
+                }
+            }
+        }
+    </script>
+
+    <!-- Chart.js และ Plugin Annotation -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@2.1.2/dist/chartjs-plugin-annotation.min.js"></script>
+    
+    <!-- PapaParse สำหรับอ่านไฟล์ CSV จาก Google Sheet -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <style>
+        body { background-color: #f3f4f6; }
+        .chart-container { position: relative; height: 420px; width: 100%; }
+        /* Loading overlay */
+        #loader { transition: opacity 0.5s ease; }
+    </style>
+</head>
+<body class="text-gray-800 antialiased font-sans flex flex-col min-h-screen">
+
+    <!-- Loading Screen -->
+    <div id="loader" class="fixed inset-0 z-50 flex flex-col items-center justify-center bg-white">
+        <i class="ph ph-spinner-gap animate-spin text-6xl text-primary mb-4"></i>
+        <h2 class="text-xl font-semibold text-gray-700">กำลังดึงข้อมูลจาก Google Sheets...</h2>
+    </div>
+
+    <!-- Header -->
+    <header class="bg-primary text-white shadow-lg">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="bg-white p-2 rounded-lg text-primary">
+                    <i class="ph ph-drop text-3xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl sm:text-2xl font-bold tracking-wide">Data Analytic Dashboard</h1>
+                    <p class="text-blue-200 text-sm">ผลการสำรวจลูกน้ำยุงลาย ตำบลห้วยโป่ง</p>
+                </div>
+            </div>
+            <div class="hidden sm:block text-right">
+                <p class="text-sm text-blue-200">อัปเดตข้อมูลทุกวันจันทร์</p>
+                <p class="text-xs text-blue-300 font-light mt-1">Real-time Syncing</p>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-4 flex-grow w-full">
+        
+        <!-- Filters Section -->
+        <section class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-8">
+            <div class="flex items-center gap-2 mb-4 border-b pb-2">
+                <i class="ph ph-funnel text-xl text-primary"></i>
+                <h2 class="text-lg font-semibold text-gray-700">ตัวกรองข้อมูล (Filters)</h2>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-600 mb-1">ปี พ.ศ.</label>
+                    <select id="filterYear" class="w-full border-gray-300 rounded-md shadow-sm focus:border-primary focus:ring-primary p-2 border outline-none" onchange="updateDashboard()">
+                        <option value="All">-- ทั้งหมด --</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-600 mb-1">สัปดาห์ที่</label>
+                    <select id="filterWeek" class="w-full border-gray-300 rounded-md shadow-sm focus:border-primary focus:ring-primary p-2 border outline-none" onchange="updateDashboard()">
+                        <option value="All">-- ทั้งหมด --</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-600 mb-1">หมู่บ้าน (หมู่)</label>
+                    <select id="filterMoo" class="w-full border-gray-300 rounded-md shadow-sm focus:border-primary focus:ring-primary p-2 border outline-none" onchange="updateDashboard()">
+                        <option value="All">-- ทั้งหมด --</option>
+                    </select>
+                </div>
+                <div class="flex items-end">
+                    <button onclick="resetFilters()" class="w-full bg-gray-100 hover:bg-gray-200 text-gray-700 p-2 rounded-md transition duration-150 flex justify-center items-center gap-2">
+                        <i class="ph ph-arrow-counter-clockwise"></i> รีเซ็ตตัวกรอง
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- KPI Summary Cards -->
+        <section class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 mb-8" id="kpiCards">
+            <!-- Rendered via JS -->
+        </section>
+
+        <!-- Charts Grid (เรียงลงมาทีละกราฟ) -->
+        <section class="grid grid-cols-1 gap-8">
+            
+            <!-- Chart 1: Containers Surveyed vs Found -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <h3 class="text-center font-semibold text-gray-700 mb-2">จำนวนภาชนะที่สำรวจเปรียบเทียบกับที่พบลูกน้ำ</h3>
+                <p class="text-center text-xs text-gray-500 mb-4">จำแนกตามสัปดาห์</p>
+                <div class="chart-container">
+                    <canvas id="chartContainers"></canvas>
+                </div>
+            </div>
+
+            <!-- Chart 2: Houses Surveyed vs Found -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <h3 class="text-center font-semibold text-gray-700 mb-2">จำนวนบ้านที่สำรวจเปรียบเทียบกับที่พบลูกน้ำ</h3>
+                <p class="text-center text-xs text-gray-500 mb-4">จำแนกตามสัปดาห์</p>
+                <div class="chart-container">
+                    <canvas id="chartHouses"></canvas>
+                </div>
+            </div>
+
+            <!-- Chart 3: Container Index (CI) -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <h3 class="text-center font-semibold text-gray-700 mb-2">ค่าดัชนีลูกน้ำยุงลายในภาชนะ (Container Index: CI)</h3>
+                <p class="text-center text-xs text-gray-500 mb-4">จำแนกรายหมู่บ้าน ตามสัปดาห์ (เกณฑ์มาตรฐาน ≤ 5)</p>
+                <div class="chart-container">
+                    <canvas id="chartCI"></canvas>
+                </div>
+            </div>
+
+            <!-- Chart 4: House Index (HI) -->
+            <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <h3 class="text-center font-semibold text-gray-700 mb-2">ค่าดัชนีลูกน้ำยุงลายในบ้าน (House Index: HI)</h3>
+                <p class="text-center text-xs text-gray-500 mb-4">จำแนกรายหมู่บ้าน ตามสัปดาห์ (เกณฑ์มาตรฐาน ≤ 5)</p>
+                <div class="chart-container">
+                    <canvas id="chartHI"></canvas>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- หมายเหตุก่อน Footer -->
+        <div class="mt-6 flex justify-end">
+            <p class="text-sm text-gray-500 italic bg-gray-100 px-4 py-2 rounded-lg inline-block">
+                หมายเหตุ: อ้างอิงสัปดาห์ตามสัปดาห์ระบาดวิทยา
+            </p>
+        </div>
+
+    </main>
+
+    <!-- Footer (กะทัดรัดและสีเดียวกับ Header) -->
+    <footer class="bg-primary py-4 px-4 shadow-inner">
+        <div class="max-w-7xl mx-auto flex flex-col items-center justify-center text-center text-white">
+            <h4 class="font-semibold text-sm sm:text-base tracking-wide mb-1">โรงพยาบาลส่งเสริมสุขภาพตำบลห้วยโป่ง</h4>
+            <p class="text-xs sm:text-sm text-blue-200 font-light">อ้างอิงผลการสำรวจลูกน้ำยุงลายจากแอปสมาร์ท อสม.</p>
+        </div>
+    </footer>
+
+    <!-- Logic Script -->
+    <script>
+        // ตั้งค่า Google Sheet
+        const sheetId = '1u7aArl6deeT7gorWk0yVCWx0mqp3OKBU_vQdeZOz-hg';
+        const sheetName = 'ชีต1';
+        // ใช้ gviz endpoint เพื่อดึงข้อมูลเป็นรูปแบบ CSV (เข้ารหัสชื่อชีตเพื่อป้องกัน URL error)
+        const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+
+        let rawData = [];
+        let chartInstances = {};
+
+        // สีมาตรฐานสำหรับวาดกราฟเส้นแยกตามหมู่บ้าน (ชุดสีสดใส)
+        const palette = [
+            '#EF476F', '#FFD166', '#06D6A0', '#118AB2', '#073B4C', 
+            '#9D4EDD', '#FF9F1C', '#2EC4B6', '#E71D36', '#FF99C8',
+            '#4CC9F0', '#43AA8B', '#577590', '#F94144', '#F3722C'
+        ];
+
+        // ตั้งค่า Font เริ่มต้นสำหรับ Chart.js
+        Chart.defaults.font.family = "'Kanit', sans-serif";
+        Chart.register(window['chartjs-plugin-annotation']);
+
+        // เริ่มโหลดข้อมูล
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchData();
+        });
+
+        function fetchData() {
+            Papa.parse(sheetUrl, {
+                download: true,
+                header: false,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    processData(results.data);
+                },
+                error: function(err) {
+                    alert("ไม่สามารถดึงข้อมูลจาก Google Sheets ได้ โปรดตรวจสอบการแชร์ไฟล์");
+                    console.error(err);
+                }
+            });
+        }
+
+        function processData(data) {
+            // ข้าม row แรก (Header)
+            const rows = data.slice(1);
+            
+            rawData = rows.map(row => {
+                const year = (row[0] || '').toString().trim();
+                const week = (row[1] || '').toString().trim();
+                const moo = (row[2] || '').toString().trim();
+                const contSurveyed = parseInt(row[3]) || 0;
+                const contFound = parseInt(row[4]) || 0;
+                const houseResultRaw = (row[5] || '').toString().trim();
+                
+                // คำนวณว่าบ้านนี้พบลูกน้ำหรือไม่
+                let isHouseFound = 0;
+                if (
+                    houseResultRaw === '1' || 
+                    houseResultRaw.includes('พบ') || 
+                    houseResultRaw.includes('มี') || 
+                    contFound > 0
+                ) {
+                    isHouseFound = 1;
+                }
+                
+                // สำหรับบ้านที่ไม่พบ
+                if (houseResultRaw.includes('ไม่พบ') || houseResultRaw.includes('ไม่มี')) {
+                    isHouseFound = 0;
+                }
+
+                return {
+                    year: year,
+                    week: week,
+                    moo: moo,
+                    contSurveyed: contSurveyed,
+                    contFound: contFound,
+                    houseSurveyed: 1, // 1 row = 1 บ้าน
+                    houseFound: isHouseFound
+                };
+            }).filter(row => row.year !== "" && row.week !== ""); // กรองแถวที่ว่างเปล่าออก
+
+            populateFilterDropdowns();
+            
+            // ซ่อน Loader
+            document.getElementById('loader').style.opacity = '0';
+            setTimeout(() => { document.getElementById('loader').style.display = 'none'; }, 500);
+
+            updateDashboard();
+        }
+
+        function populateFilterDropdowns() {
+            const years = [...new Set(rawData.map(item => item.year))].sort((a,b) => b.localeCompare(a));
+            const weeks = [...new Set(rawData.map(item => item.week))].sort((a,b) => parseInt(a) - parseInt(b));
+            const moos = [...new Set(rawData.map(item => item.moo))].sort((a,b) => parseInt(a) - parseInt(b) || a.localeCompare(b));
+
+            const populate = (id, items) => {
+                const select = document.getElementById(id);
+                select.options.length = 1; 
+                items.forEach(item => {
+                    const opt = document.createElement('option');
+                    opt.value = item;
+                    opt.text = item;
+                    select.add(opt);
+                });
+            };
+
+            populate('filterYear', years);
+            populate('filterWeek', weeks);
+            populate('filterMoo', moos);
+
+            if(years.length > 0) {
+                document.getElementById('filterYear').value = years[0];
+            }
+        }
+
+        function resetFilters() {
+            const years = [...new Set(rawData.map(item => item.year))].sort((a,b) => b.localeCompare(a));
+            document.getElementById('filterYear').value = years.length > 0 ? years[0] : 'All';
+            document.getElementById('filterWeek').value = 'All';
+            document.getElementById('filterMoo').value = 'All';
+            updateDashboard();
+        }
+
+        function updateDashboard() {
+            const selYear = document.getElementById('filterYear').value;
+            const selWeek = document.getElementById('filterWeek').value;
+            const selMoo = document.getElementById('filterMoo').value;
+
+            let filtered = rawData;
+            if (selYear !== 'All') filtered = filtered.filter(d => d.year === selYear);
+            if (selWeek !== 'All') filtered = filtered.filter(d => d.week === selWeek);
+            if (selMoo !== 'All') filtered = filtered.filter(d => d.moo === selMoo);
+
+            updateKPIs(filtered);
+            renderCharts(filtered);
+        }
+
+        function updateKPIs(data) {
+            const totalContSurveyed = data.reduce((sum, item) => sum + item.contSurveyed, 0);
+            const totalContFound = data.reduce((sum, item) => sum + item.contFound, 0);
+            const totalHouseSurveyed = data.reduce((sum, item) => sum + item.houseSurveyed, 0);
+            const totalHouseFound = data.reduce((sum, item) => sum + item.houseFound, 0);
+
+            const overallCI = totalContSurveyed > 0 ? ((totalContFound / totalContSurveyed) * 100).toFixed(2) : 0;
+            const overallHI = totalHouseSurveyed > 0 ? ((totalHouseFound / totalHouseSurveyed) * 100).toFixed(2) : 0;
+
+            const html = `
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-4">
+                    <div class="p-3 bg-blue-50 text-blue-600 rounded-full"><i class="ph ph-house text-2xl"></i></div>
+                    <div>
+                        <p class="text-sm text-gray-500 font-medium">บ้านที่สำรวจทั้งหมด</p>
+                        <p class="text-2xl font-bold text-gray-800">${totalHouseSurveyed.toLocaleString()} <span class="text-sm font-normal">หลัง</span></p>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-4">
+                    <div class="p-3 bg-red-50 text-red-600 rounded-full"><i class="ph ph-bug text-2xl"></i></div>
+                    <div>
+                        <p class="text-sm text-gray-500 font-medium">บ้านที่พบลูกน้ำ</p>
+                        <p class="text-2xl font-bold text-gray-800">${totalHouseFound.toLocaleString()} <span class="text-sm font-normal">หลัง</span></p>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border ${overallCI > 5 ? 'border-red-300' : 'border-gray-100'} p-4 flex items-center gap-4">
+                    <div class="p-3 ${overallCI > 5 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'} rounded-full">
+                        <i class="ph ph-chart-line-up text-2xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500 font-medium">ค่า CI ภาพรวม</p>
+                        <p class="text-2xl font-bold ${overallCI > 5 ? 'text-red-600' : 'text-emerald-600'}">${overallCI}</p>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl shadow-sm border ${overallHI > 5 ? 'border-red-300' : 'border-gray-100'} p-4 flex items-center gap-4">
+                    <div class="p-3 ${overallHI > 5 ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-600'} rounded-full">
+                        <i class="ph ph-house-line text-2xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500 font-medium">ค่า HI ภาพรวม</p>
+                        <p class="text-2xl font-bold ${overallHI > 5 ? 'text-red-600' : 'text-emerald-600'}">${overallHI}</p>
+                    </div>
+                </div>
+            `;
+            document.getElementById('kpiCards').innerHTML = html;
+        }
+
+        const standardLineAnnotation = {
+            type: 'line',
+            yMin: 5,
+            yMax: 5,
+            borderColor: 'rgba(255, 99, 132, 0.8)',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            label: {
+                display: true,
+                content: 'ค่ามาตรฐาน (5)',
+                position: 'end',
+                backgroundColor: 'rgba(255, 99, 132, 0.8)'
+            }
+        };
+
+        function renderCharts(data) {
+            const labelsWeek = [...new Set(data.map(item => item.week))].sort((a,b) => parseInt(a) - parseInt(b));
+            
+            const barData = labelsWeek.map(wk => {
+                const wData = data.filter(d => d.week === wk);
+                return {
+                    week: 'สัปดาห์ ' + wk,
+                    cSurveyed: wData.reduce((sum, item) => sum + item.contSurveyed, 0),
+                    cFound: wData.reduce((sum, item) => sum + item.contFound, 0),
+                    hSurveyed: wData.reduce((sum, item) => sum + item.houseSurveyed, 0),
+                    hFound: wData.reduce((sum, item) => sum + item.houseFound, 0),
+                }
+            });
+
+            createOrUpdateChart('chartContainers', 'bar', {
+                labels: barData.map(d => d.week),
+                datasets: [
+                    { label: 'ภาชนะที่สำรวจ', data: barData.map(d => d.cSurveyed), backgroundColor: 'rgba(54, 162, 235, 0.8)' },
+                    { label: 'ภาชนะที่พบลูกน้ำ', data: barData.map(d => d.cFound), backgroundColor: 'rgba(255, 99, 132, 0.8)' }
+                ]
+            });
+
+            createOrUpdateChart('chartHouses', 'bar', {
+                labels: barData.map(d => d.week),
+                datasets: [
+                    { label: 'บ้านที่สำรวจ', data: barData.map(d => d.hSurveyed), backgroundColor: 'rgba(54, 162, 235, 0.8)' },
+                    { label: 'บ้านที่พบลูกน้ำ', data: barData.map(d => d.hFound), backgroundColor: 'rgba(255, 99, 132, 0.8)' }
+                ]
+            });
+
+            const allMoosInFiltered = [...new Set(data.map(item => item.moo))].sort((a,b) => parseInt(a) - parseInt(b) || a.localeCompare(b));
+            
+            const datasetsCI = [];
+            const datasetsHI = [];
+
+            allMoosInFiltered.forEach((moo, index) => {
+                const color = palette[index % palette.length];
+                const dataCI = [];
+                const dataHI = [];
+
+                labelsWeek.forEach(wk => {
+                    const wMooData = data.filter(d => d.week === wk && d.moo === moo);
+                    if(wMooData.length === 0) {
+                        dataCI.push(null);
+                        dataHI.push(null);
+                        return;
+                    }
+
+                    const tContSurv = wMooData.reduce((sum, item) => sum + item.contSurveyed, 0);
+                    const tContFound = wMooData.reduce((sum, item) => sum + item.contFound, 0);
+                    const tHouseSurv = wMooData.reduce((sum, item) => sum + item.houseSurveyed, 0);
+                    const tHouseFound = wMooData.reduce((sum, item) => sum + item.houseFound, 0);
+
+                    const ci = tContSurv > 0 ? (tContFound / tContSurv) * 100 : 0;
+                    const hi = tHouseSurv > 0 ? (tHouseFound / tHouseSurv) * 100 : 0;
+
+                    dataCI.push(ci.toFixed(2));
+                    dataHI.push(hi.toFixed(2));
+                });
+
+                datasetsCI.push({
+                    label: `หมู่ ${moo}`,
+                    data: dataCI,
+                    borderColor: color,
+                    backgroundColor: color,
+                    borderWidth: 3,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    tension: 0.3,
+                    spanGaps: true
+                });
+
+                datasetsHI.push({
+                    label: `หมู่ ${moo}`,
+                    data: dataHI,
+                    borderColor: color,
+                    backgroundColor: color,
+                    borderWidth: 3,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    tension: 0.3,
+                    spanGaps: true
+                });
+            });
+
+            createOrUpdateChart('chartCI', 'line', {
+                labels: barData.map(d => d.week),
+                datasets: datasetsCI
+            }, {
+                plugins: { annotation: { annotations: { line1: standardLineAnnotation } } },
+                scales: { y: { beginAtZero: true } }
+            });
+
+            createOrUpdateChart('chartHI', 'line', {
+                labels: barData.map(d => d.week),
+                datasets: datasetsHI
+            }, {
+                plugins: { annotation: { annotations: { line1: standardLineAnnotation } } },
+                scales: { y: { beginAtZero: true } }
+            });
+        }
+
+        function createOrUpdateChart(chartId, type, data, extraOptions = {}) {
+            const ctx = document.getElementById(chartId).getContext('2d');
+            
+            if (chartInstances[chartId]) {
+                chartInstances[chartId].destroy();
+            }
+
+            const baseOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom' },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                hover: { mode: 'nearest', intersect: true }
+            };
+
+            const finalOptions = Object.assign({}, baseOptions, extraOptions);
+            
+            if (extraOptions.plugins) {
+                finalOptions.plugins = { ...baseOptions.plugins, ...extraOptions.plugins };
+            }
+
+            chartInstances[chartId] = new Chart(ctx, {
+                type: type,
+                data: data,
+                options: finalOptions
+            });
+        }
+    </script>
+</body>
+</html>
