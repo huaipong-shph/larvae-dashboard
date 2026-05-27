@@ -106,6 +106,13 @@
                     </button>
                 </div>
             </div>
+            
+            <!-- ข้อความแสดงผลอ้างอิงจากชีตสัปดาห์ระบาดวิทยา -->
+            <div class="mt-4">
+                <p id="epiWeekInfo" class="text-sm font-medium text-primary bg-blue-50 p-3 rounded-lg flex items-center gap-2">
+                    <i class="ph ph-calendar-blank text-lg"></i> กำลังโหลดข้อมูลวันที่...
+                </p>
+            </div>
         </section>
 
         <!-- KPI Summary Cards -->
@@ -173,13 +180,16 @@
 
     <!-- Logic Script -->
     <script>
-        // ตั้งค่า Google Sheet
+        // ตั้งค่า Google Sheet ID
         const sheetId = '1u7aArl6deeT7gorWk0yVCWx0mqp3OKBU_vQdeZOz-hg';
-        const sheetName = 'ชีต1';
-        // ใช้ gviz endpoint เพื่อดึงข้อมูลเป็นรูปแบบ CSV (เข้ารหัสชื่อชีตเพื่อป้องกัน URL error)
-        const sheetUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
+        
+        // URL สำหรับชีตหลัก
+        const dataUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('ชีต1')}`;
+        // URL สำหรับชีตสัปดาห์ระบาดวิทยา
+        const epiUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent('สัปดาห์ระบาดวิทยา')}`;
 
         let rawData = [];
+        let epiData = [];
         let chartInstances = {};
 
         // สีมาตรฐานสำหรับวาดกราฟเส้นแยกตามหมู่บ้าน (ชุดสีสดใส)
@@ -189,34 +199,57 @@
             '#4CC9F0', '#43AA8B', '#577590', '#F94144', '#F3722C'
         ];
 
-        // ตั้งค่า Font เริ่มต้นสำหรับ Chart.js
         Chart.defaults.font.family = "'Kanit', sans-serif";
         Chart.register(window['chartjs-plugin-annotation']);
 
-        // เริ่มโหลดข้อมูล
         document.addEventListener('DOMContentLoaded', () => {
             fetchData();
         });
 
         function fetchData() {
-            Papa.parse(sheetUrl, {
-                download: true,
-                header: false,
-                skipEmptyLines: true,
-                complete: function(results) {
-                    processData(results.data);
-                },
-                error: function(err) {
-                    alert("ไม่สามารถดึงข้อมูลจาก Google Sheets ได้ โปรดตรวจสอบการแชร์ไฟล์");
-                    console.error(err);
-                }
+            // ดึงข้อมูลทั้ง 2 ชีตพร้อมกัน
+            Promise.all([
+                fetchCSV(dataUrl),
+                fetchCSV(epiUrl)
+            ]).then(results => {
+                const dataCSV = results[0].data;
+                const epiCSV = results[1].data;
+
+                processEpiData(epiCSV);
+                processData(dataCSV);
+            }).catch(err => {
+                alert("ไม่สามารถดึงข้อมูลจาก Google Sheets ได้ โปรดตรวจสอบว่าชีตถูกแชร์แบบ 'ทุกคนที่มีลิงก์' แล้วหรือไม่");
+                console.error(err);
             });
         }
 
+        // ฟังก์ชันช่วยดึง CSV ผ่าน PapaParse แบบ Promise
+        function fetchCSV(url) {
+            return new Promise((resolve, reject) => {
+                Papa.parse(url, {
+                    download: true,
+                    header: false,
+                    skipEmptyLines: true,
+                    complete: resolve,
+                    error: reject
+                });
+            });
+        }
+
+        function processEpiData(data) {
+            const rows = data.slice(1); // ข้าม Header
+            epiData = rows.map(row => {
+                return {
+                    year: (row[0] || '').toString().trim(),
+                    week: (row[1] || '').toString().trim(),
+                    startDate: (row[2] || '').toString().trim(),
+                    endDate: (row[3] || '').toString().trim()
+                };
+            }).filter(row => row.year !== "" && row.week !== "");
+        }
+
         function processData(data) {
-            // ข้าม row แรก (Header)
-            const rows = data.slice(1);
-            
+            const rows = data.slice(1); // ข้าม Header
             rawData = rows.map(row => {
                 const year = (row[0] || '').toString().trim();
                 const week = (row[1] || '').toString().trim();
@@ -225,18 +258,10 @@
                 const contFound = parseInt(row[4]) || 0;
                 const houseResultRaw = (row[5] || '').toString().trim();
                 
-                // คำนวณว่าบ้านนี้พบลูกน้ำหรือไม่
                 let isHouseFound = 0;
-                if (
-                    houseResultRaw === '1' || 
-                    houseResultRaw.includes('พบ') || 
-                    houseResultRaw.includes('มี') || 
-                    contFound > 0
-                ) {
+                if (houseResultRaw === '1' || houseResultRaw.includes('พบ') || houseResultRaw.includes('มี') || contFound > 0) {
                     isHouseFound = 1;
                 }
-                
-                // สำหรับบ้านที่ไม่พบ
                 if (houseResultRaw.includes('ไม่พบ') || houseResultRaw.includes('ไม่มี')) {
                     isHouseFound = 0;
                 }
@@ -247,14 +272,14 @@
                     moo: moo,
                     contSurveyed: contSurveyed,
                     contFound: contFound,
-                    houseSurveyed: 1, // 1 row = 1 บ้าน
+                    houseSurveyed: 1, 
                     houseFound: isHouseFound
                 };
-            }).filter(row => row.year !== "" && row.week !== ""); // กรองแถวที่ว่างเปล่าออก
+            }).filter(row => row.year !== "" && row.week !== "");
 
             populateFilterDropdowns();
             
-            // ซ่อน Loader
+            // ซ่อน Loader เมื่อโหลดเสร็จ
             document.getElementById('loader').style.opacity = '0';
             setTimeout(() => { document.getElementById('loader').style.display = 'none'; }, 500);
 
@@ -308,8 +333,47 @@
             if (selWeekEnd !== 'All') filtered = filtered.filter(d => parseInt(d.week) <= parseInt(selWeekEnd));
             if (selMoo !== 'All') filtered = filtered.filter(d => d.moo === selMoo);
 
+            updateEpiText(selYear, selWeekStart, selWeekEnd);
             updateKPIs(filtered);
             renderCharts(filtered);
+        }
+
+        function updateEpiText(selYear, selWeekStart, selWeekEnd) {
+            const textElement = document.getElementById('epiWeekInfo');
+            if (!textElement || epiData.length === 0) return;
+
+            let targetYear = selYear;
+            if (targetYear === 'All') {
+                const yearSelect = document.getElementById('filterYear');
+                targetYear = yearSelect.options.length > 1 ? yearSelect.options[1].value : '';
+            }
+
+            let targetStartWeek = selWeekStart;
+            if (targetStartWeek === 'All') {
+                const startSelect = document.getElementById('filterWeekStart');
+                targetStartWeek = startSelect.options.length > 1 ? startSelect.options[1].value : '';
+            }
+
+            let targetEndWeek = selWeekEnd;
+            if (targetEndWeek === 'All') {
+                const endSelect = document.getElementById('filterWeekEnd');
+                targetEndWeek = endSelect.options.length > 1 ? endSelect.options[endSelect.options.length - 1].value : '';
+            }
+
+            const startInfo = epiData.find(d => d.year === targetYear && d.week === targetStartWeek);
+            const endInfo = epiData.find(d => d.year === targetYear && d.week === targetEndWeek);
+
+            const iconHtml = `<i class="ph ph-calendar-blank text-lg"></i>`;
+
+            if (startInfo && endInfo) {
+                if (startInfo.week === endInfo.week) {
+                     textElement.innerHTML = `${iconHtml} ข้อมูลสัปดาห์ที่ ${startInfo.week} (${startInfo.startDate} - ${startInfo.endDate})`;
+                } else {
+                     textElement.innerHTML = `${iconHtml} ข้อมูลสัปดาห์ที่ ${startInfo.week} (${startInfo.startDate} - ${startInfo.endDate}) ถึง สัปดาห์ที่ ${endInfo.week} (${endInfo.startDate} - ${endInfo.endDate})`;
+                }
+            } else {
+                textElement.innerHTML = `<i class="ph ph-warning-circle text-lg text-warning"></i> <span class="text-gray-500">ไม่พบข้อมูลวันที่ของสัปดาห์ที่เลือกระบุในชีต "สัปดาห์ระบาดวิทยา"</span>`;
+            }
         }
 
         function updateKPIs(data) {
